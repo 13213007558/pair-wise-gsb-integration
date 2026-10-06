@@ -36,6 +36,12 @@ module Integration
   # Infinity
   Infinity = :infinity
 
+  OscillatoryResult = Struct.new(:value, :error, :amplitude_evaluations, :iterations, :converged) do
+    def to_f
+      value.to_f
+    end
+  end
+
   # Pure Ruby methods available.
   RUBY_METHODS = [:rectangle, :trapezoid, :simpson, :adaptive_quadrature,
                  :gauss, :romberg, :monte_carlo, :gauss_kronrod,
@@ -104,6 +110,65 @@ module Integration
       else
         fail "Unknown integration method \"#{options[:method]}\""
       end
+    end
+
+    # Integrate f(x) * cos(omega*x) or f(x) * sin(omega*x) on a finite interval.
+    # The slowly changing amplitude f is handled separately from the oscillation.
+    def oscillatory(t1, t2, omega, options = {}, &f)
+      fail 'No function passed' unless block_given?
+      fail 'Non-numeric bounds' unless t1.is_a?(Numeric) && t2.is_a?(Numeric)
+      fail 'Non-numeric frequency' unless omega.is_a?(Numeric)
+      fail 'Finite bounds are required' if infinite?(t1) || infinite?(t2)
+      lower_preview = t1.to_f
+      upper_preview = t2.to_f
+      frequency_preview = omega.to_f
+      unless finite_float?(lower_preview) && finite_float?(upper_preview) &&
+             finite_float?(frequency_preview)
+        fail 'Finite bounds and frequency are required'
+      end
+
+      oscillation = options.fetch(:oscillation, :cos).to_sym
+      unless [:cos, :sin].include?(oscillation)
+        fail 'Oscillation must be :cos or :sin'
+      end
+
+      options = options.merge(oscillation: oscillation)
+      lower_bound = [t1, t2].min.to_f
+      upper_bound = [t1, t2].max.to_f
+      orientation = t1 < t2 ? 1.0 : (t1 > t2 ? -1.0 : 0.0)
+      omega = frequency_preview
+      phase = (omega.abs * (upper_bound - lower_bound)).abs
+
+      if lower_bound == upper_bound
+        return OscillatoryResult.new(0.0, 0.0, 0, 1, true)
+      end
+
+      if phase <= 1.0
+        value, error, evaluations = oscillatory_plain(lower_bound, upper_bound, omega, options, &f)
+        OscillatoryResult.new(value * orientation, error, evaluations, 1, true)
+      else
+        integral, error, evaluations, iterations, converged = oscillatory_levin(
+          lower_bound, upper_bound, omega, options, &f
+        )
+        value = oscillation == :sin ? integral.imag : integral.real
+        OscillatoryResult.new(value * orientation, error, evaluations, iterations, converged)
+      end
+    end
+
+    alias_method :integrate_oscillatory, :oscillatory
+
+    def oscillatory_plain(a, b, omega, options, &f)
+      oscillation = options.fetch(:oscillation, :cos)
+      tolerance = options.fetch(:tolerance, 1e-10).to_f
+      relative_tolerance = options.fetch(:relative_tolerance, tolerance).to_f
+
+      adaptive_simpson_with_error(a, b, tolerance, relative_tolerance) do |x|
+        f.call(x) * (oscillation == :sin ? Math.sin(omega * x) : Math.cos(omega * x))
+      end
+    end
+
+    def finite_float?(value)
+      value == value && value.infinite?.nil?
     end
 
     # Integrate using the GSL bindings.

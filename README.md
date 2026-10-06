@@ -26,6 +26,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
+* Dedicated finite-interval quadrature for `f(x) * cos(omega*x)` and `f(x) * sin(omega*x)`, including an error estimate and amplitude evaluation count.
 
 ## Examples
 
@@ -44,6 +45,19 @@ end
 
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
+
+# For a rapidly oscillating integrand, provide the slowly changing amplitude only.
+result = Integration.oscillatory(0, 1, 10000.0, oscillation: :cos, tolerance: 1e-10) do |x|
+  1 + (2 * x) + (3 * x**2)
+end
+result.value                  # Integral estimate
+result.error                  # Estimated numerical error
+result.amplitude_evaluations  # Number of calls to the amplitude block
+result.converged              # Whether the tolerance test passed
+
+# Use oscillation: :sin for f(x) * sin(omega*x). For small omega on a finite
+# interval, the method automatically falls back to ordinary adaptive Simpson
+# quadrature.
 ```
 
 ## License

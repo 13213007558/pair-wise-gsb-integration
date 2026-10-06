@@ -122,6 +122,172 @@ module Integration
       helper.call(a, b, fa, fb, fc, h, s, 1)
     end
 
+    def adaptive_simpson_with_error(a, b, tolerance, relative_tolerance, max_depth = 20)
+      a = a.to_f
+      b = b.to_f
+      width = b - a
+      evaluations = 0
+
+      amplitude = proc do |x|
+        evaluations += 1
+        yield(x).to_f
+      end
+
+      fa = amplitude.call(a)
+      fm = amplitude.call((a + b) / 2.0)
+      fb = amplitude.call(b)
+      coarse = width * (fa + 4.0 * fm + fb) / 6.0
+
+      intervals = [[a, b, fa, fm, fb, coarse, 1]]
+      value = 0.0
+      error = 0.0
+
+      while interval = intervals.pop
+        left, right, fl, fc, fr, whole, depth = interval
+        middle = (left + right) / 2.0
+        f_left_middle = amplitude.call((left + middle) / 2.0)
+        f_right_middle = amplitude.call((middle + right) / 2.0)
+
+        left_width = middle - left
+        right_width = right - middle
+        left_value = left_width * (fl + 4.0 * f_left_middle + fc) / 6.0
+        right_value = right_width * (fc + 4.0 * f_right_middle + fr) / 6.0
+        refined = left_value + right_value
+        interval_error = (refined - whole).abs / 15.0
+        interval_tolerance = (tolerance + relative_tolerance * coarse.abs) *
+                             ((right - left) / width)
+
+        if depth < max_depth && interval_error > interval_tolerance
+          intervals.push([left, middle, fl, f_left_middle, fc, left_value, depth + 1])
+          intervals.push([middle, right, fc, f_right_middle, fr, right_value, depth + 1])
+        else
+          value += refined
+          error += interval_error
+        end
+      end
+
+      [value, error, evaluations]
+    end
+
+    def oscillatory_levin(a, b, omega, options)
+      start_order = options.fetch(:initial_order, 8).to_i
+      max_order = options.fetch(:max_order, 64).to_i
+      tolerance = options.fetch(:tolerance, 1e-10).to_f
+      relative_tolerance = options.fetch(:relative_tolerance, tolerance).to_f
+      component = options.fetch(:oscillation, :cos).to_sym
+
+      fail 'Initial order must be positive' unless start_order > 0
+      fail 'Maximum order must be greater than or equal to initial order' unless max_order >= start_order
+
+      a = a.to_f
+      b = b.to_f
+      width = b - a
+      cached_values = {}
+      amplitude = proc do |x|
+        unless cached_values.key?(x)
+          cached_values[x] = yield(a + (x + 1.0) * width / 2.0).to_f
+        end
+        cached_values[x]
+      end
+
+      order = start_order
+      previous = nil
+      integral = nil
+      error = nil
+      iterations = 0
+
+      while order <= max_order
+        iterations += 1
+        nodes = Array.new(order + 1) { |j| Math.cos(Math::PI * j / order) }
+        values = nodes.map { |node| amplitude.call(node) }
+        matrix = Array.new(order + 1) { Array.new(order + 1) { Complex(0.0, 0.0) } }
+        rhs = values.map { |value| Complex(value, 0.0) }
+
+        (0..order).each do |row|
+          (0..order).each do |column|
+            matrix[row][column] = Complex((2.0 / width) * chebyshev_derivative_entry(nodes, row, column, order), 0.0)
+          end
+          matrix[row][row] += Complex(0.0, omega.to_f)
+        end
+
+        nodal_values = solve_complex_linear_system(matrix, rhs)
+        integral = complex_unit_exp(omega * b) * nodal_values[0] -
+                   complex_unit_exp(omega * a) * nodal_values[order]
+        current = (component == :sin) ? integral.imag : integral.real
+        error = previous.nil? ? Float::INFINITY : (current - previous).abs
+        break if !previous.nil? && error <= tolerance + relative_tolerance * current.abs
+
+        previous = current
+        next_order =
+          if order < 8
+            8
+          elsif order < max_order
+            [order * 2, max_order].min
+          else
+            max_order + 1
+          end
+
+        if next_order == order
+          order = max_order + 1
+        else
+          order = next_order
+        end
+      end
+
+      [integral, error, cached_values.length, iterations, order <= max_order]
+    end
+
+    def chebyshev_derivative_entry(nodes, row, column, order)
+      x_row = nodes[row]
+
+      if row == column
+        if row == 0
+          (2.0 * order * order + 1.0) / 6.0
+        elsif row == order
+          -(2.0 * order * order + 1.0) / 6.0
+        else
+          -x_row / (2.0 * (1.0 - x_row * x_row))
+        end
+      else
+        row_factor = (row == 0 || row == order) ? 2.0 : 1.0
+        column_factor = (column == 0 || column == order) ? 2.0 : 1.0
+        sign = ((row + column).even? ? 1.0 : -1.0)
+        (row_factor / column_factor) * sign / (x_row - nodes[column])
+      end
+    end
+
+    def solve_complex_linear_system(matrix, vector)
+      n = vector.length
+      a = matrix.each_with_index.map do |row, i|
+        row.map { |value| value + Complex(0.0, 0.0) } << vector[i]
+      end
+
+      (0...n).each do |column|
+        pivot = (column...n).max_by { |row| a[row][column].abs2 }
+        a[column], a[pivot] = a[pivot], a[column] if pivot != column
+
+        pivot_value = a[column][column]
+        fail 'Oscillatory quadrature matrix is singular' if pivot_value.abs2 == 0.0
+
+        ((column + 1)...n).each do |row|
+          factor = a[row][column] / pivot_value
+          ((column + 1)..n).each { |j| a[row][j] -= factor * a[column][j] }
+        end
+      end
+
+      solution = Array.new(n) { Complex(0.0, 0.0) }
+      (n - 1).downto(0) do |row|
+        sum = a[row][n]
+        ((row + 1)...n).each { |column| sum -= a[row][column] * solution[column] }
+        solution[row] = sum / a[row][row]
+      end
+      solution
+    end
+
+    def complex_unit_exp(theta)
+      Complex(Math.cos(theta), Math.sin(theta))
+    end
+
     # Gaussian Quadrature
     # n-point Gaussian quadrature rule gives an exact result for polynomials of degree 2n − 1 or less
     def gauss(t1, t2, n)
