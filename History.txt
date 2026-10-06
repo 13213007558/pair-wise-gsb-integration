@@ -1,3 +1,10 @@
+=== 0.1.5 / unreleased
+  * Added tanh-sinh (double exponential) quadrature for finite intervals with
+    integrable endpoint singularities: Integration.tanh_sinh returns a full
+    result report (value, discretization error, tail truncation estimate,
+    evaluation count, stop reason); also available as method: :tanh_sinh in
+    Integration.integrate as an explicit opt-in.
+
 === 0.1.4 / 2015-05-23
   * GSL will be used if available. The tests will only pass if rb-gsl is installed.
   * Specs depending on GSL will fail without `rb-gsl` installed.

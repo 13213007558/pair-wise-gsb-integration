@@ -24,6 +24,7 @@
 # in this Software without prior written authorization from Beng.
 
 require 'integration/methods'
+require 'integration/tanh_sinh'
 
 # Diverse integration methods
 # Use Integration.integrate as wrapper to direct access to methods
@@ -77,6 +78,11 @@ module Integration
     # check for above/below curve.
     # [:qng] GSL QNG non-adaptive Gauss-Kronrod integration.
     # [:qag] GSL QAG adaptive integration, with support for infinite bounds.
+    # [:tanh_sinh] Tanh-sinh (double exponential) quadrature for finite
+    # intervals, including integrable endpoint singularities. Returns only
+    # the value and raises if the tolerance was not met; use
+    # Integration.tanh_sinh directly for the full report (evaluation
+    # count, error estimates and stop reason).
     def integrate(t1, t2, options = {}, &f)
       inf_bounds = (infinite?(t1) || infinite?(t2))
 
@@ -96,7 +102,20 @@ module Integration
       default_opts = { tolerance: 1e-10, initial_step: 16, step: 16, method: def_method }
       options = default_opts.merge(options)
 
-      if RUBY_METHODS.include? options[:method]
+      if options[:method] == :tanh_sinh
+        fail "tanh_sinh doesn't support infinity bounds" if inf_bounds
+        ts_options = { tolerance: options[:tolerance] }
+        [:max_levels, :max_points].each do |key|
+          ts_options[key] = options[key] if options.key?(key)
+        end
+        result = tanh_sinh(lower_bound, upper_bound, ts_options, &f)
+        unless result.converged?
+          fail "tanh_sinh did not meet the requested tolerance " \
+               "(status: #{result.status}, evaluations: #{result.evaluations}, " \
+               "error: #{result.error}, tail_error: #{result.tail_error})"
+        end
+        result.value
+      elsif RUBY_METHODS.include? options[:method]
         fail "Ruby methods doesn't support infinity bounds" if inf_bounds
         integrate_ruby(lower_bound, upper_bound, options, &f)
       elsif GSL_METHODS.include? options[:method]

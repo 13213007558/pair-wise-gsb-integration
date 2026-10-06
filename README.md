@@ -25,6 +25,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
+* Tanh-sinh (double exponential) quadrature for finite intervals with integrable endpoint singularities (e.g. log(x), 1/sqrt(x)), with per-run reporting of evaluation counts, error estimates and stop reason.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
 
 ## Examples
@@ -44,6 +45,24 @@ end
 
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
+```
+
+### Endpoint singularities (tanh-sinh)
+
+```ruby
+# log(x) is singular at 0 but integrable; the integrand is never
+# evaluated at the endpoints.
+result = Integration.tanh_sinh(0, 1, tolerance: 1e-10) { |x| Math.log(x) }
+result.value        # => -1.0
+result.evaluations  # => number of integrand evaluations
+result.error        # => discretization (mesh) error estimate
+result.tail_error   # => transformation tail truncation estimate
+result.status       # => :ok, :max_levels, :divergent or :non_finite
+result.converged?   # => true only when the tolerance was actually met
+
+# Also available through integrate as an explicit opt-in method; raises
+# when the tolerance cannot be verified (e.g. divergent integrals):
+Integration.integrate(0, 1, method: :tanh_sinh) { |x| 1.0 / Math.sqrt(x) } # => 2.0
 ```
 
 ## License
