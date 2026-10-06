@@ -1,3 +1,12 @@
+=== Unreleased
+  * Added Integration.validated_integrate: validated integration with
+    rigorous lower/upper bounds. The caller supplies an enclosure oracle
+    valid on any subinterval; the algorithm adaptively bisects and
+    accumulates guaranteed bounds. Supports exact Rational arithmetic or
+    Float arithmetic with explicit outward rounding, and returns the
+    current enclosure with :budget_exhausted status when max_evaluations
+    runs out before the tolerance is met.
+
 === 0.1.4 / 2015-05-23
   * GSL will be used if available. The tests will only pass if rb-gsl is installed.
   * Specs depending on GSL will fail without `rb-gsl` installed.

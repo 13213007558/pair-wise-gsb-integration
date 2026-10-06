@@ -26,6 +26,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
+* Validated integration via Integration.validated_integrate: rigorous lower/upper bounds that are guaranteed to contain the true integral.
 
 ## Examples
 
@@ -45,6 +46,44 @@ end
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
+
+
+## Validated integration
+
+Some tasks need bounds that are *guaranteed* to contain the true value, not
+just a point estimate with a sampling error estimate. For those, use
+`Integration.validated_integrate`. Instead of a pointwise function you supply
+an *enclosure oracle*: a block that receives a subinterval `(a, b)` and
+returns a pair `[lo, hi]` such that `lo <= f(x) <= hi` for every `x` in
+`[a, b]`. The algorithm adaptively bisects the subinterval with the widest
+contribution and accumulates rigorous bounds:
+
+```ruby
+# Integral of x^2 over [0, 1] is 1/3. x^2 is increasing on [0, 1],
+# so [a^2, b^2] is a valid enclosure on any subinterval [a, b].
+result = Integration.validated_integrate(Rational(0), Rational(1),
+                                         tolerance: Rational(1, 1000)) do |a, b|
+  [a * a, b * b]
+end
+
+result.include?(Rational(1, 3)) # => true, guaranteed
+result.width                    # => <= 1/1000
+result.status                   # => :converged
+```
+
+Sampling a plain Float callback cannot prove anything about the unsampled
+error, so validated integration never pretends otherwise:
+
+* With Rational/Integer bounds and enclosures (`arithmetic: :exact`, picked
+  automatically by `arithmetic: :auto`), all arithmetic is exact.
+* With Floats (`arithmetic: :float`), every operation is rounded outward
+  through a running error bound, so the enclosure still holds. The oracle
+  itself must round its own computations outward, e.g.
+  `[Math.exp(a) * (1 - 1e-13), Math.exp(b) * (1 + 1e-13)]` for exp on [a, b].
+
+The evaluation budget is controlled with `max_evaluations` (default 10_000).
+If the budget runs out before `tolerance` is met, the current - still valid -
+enclosure is returned with `result.status == :budget_exhausted`.
 
 ## License
 
