@@ -24,6 +24,7 @@
 # in this Software without prior written authorization from Beng.
 
 require 'integration/methods'
+require 'integration/tanh_sinh'
 
 # Diverse integration methods
 # Use Integration.integrate as wrapper to direct access to methods
@@ -39,7 +40,7 @@ module Integration
   # Pure Ruby methods available.
   RUBY_METHODS = [:rectangle, :trapezoid, :simpson, :adaptive_quadrature,
                  :gauss, :romberg, :monte_carlo, :gauss_kronrod,
-                 :simpson3by8, :boole, :open_trapezoid, :milne]
+                 :simpson3by8, :boole, :open_trapezoid, :milne, :tanh_sinh]
 
   # Methods available when using the `rb-gsl` gem.
   GSL_METHODS = [:qng, :qag]
@@ -75,9 +76,12 @@ module Integration
     # [:romberg] extrapolation of recursion approximation until error < [tolerance].
     # [:monte_carlo] make [:initial_step+:step*iteration] random samples, and
     # check for above/below curve.
-    # [:qng] GSL QNG non-adaptive Gauss-Kronrod integration.
-    # [:qag] GSL QAG adaptive integration, with support for infinite bounds.
-    def integrate(t1, t2, options = {}, &f)
+  # [:qng] GSL QNG non-adaptive Gauss-Kronrod integration.
+  # [:qag] GSL QAG adaptive integration, with support for infinite bounds.
+  # [:tanh_sinh] tanh-sinh (double exponential) quadrature for finite
+  # intervals, including integrable endpoint singularities; raises unless
+  # both the discretization error and the tail truncation meet [tolerance].
+  def integrate(t1, t2, options = {}, &f)
       inf_bounds = (infinite?(t1) || infinite?(t2))
 
       fail 'No function passed' unless block_given?
@@ -137,6 +141,17 @@ module Integration
 
     def integrate_ruby(lower_bound, upper_bound, options, &f)
       method = options[:method]
+
+      if method == :tanh_sinh
+        result = tanh_sinh(lower_bound, upper_bound, options, &f)
+        unless result.converged?
+          fail "Integral did not converge (tanh_sinh stop reason: " \
+               "#{result.stop_reason}, error estimate: #{result.error}, " \
+               "evaluations: #{result.evaluations})"
+        end
+        return result.value
+      end
+
       tolerance = options[:tolerance]
       initial_step = options[:initial_step]
       step = options[:step]

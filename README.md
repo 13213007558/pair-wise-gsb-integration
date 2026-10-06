@@ -25,6 +25,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
+* Tanh-sinh (double exponential) quadrature for finite intervals with integrable endpoint singularities, opt-in via method: :tanh_sinh.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
 
 ## Examples
@@ -43,6 +44,20 @@ normal_pdf = lambda do |x|
 end
 
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
+
+# Integrate log(x) in [0, 1], which is singular at x = 0, using tanh-sinh
+# quadrature. The integrand is never evaluated at the endpoints.
+Integration.integrate(0, 1, method: :tanh_sinh) do |x|
+  Math.log(x)
+end
+# => -1.0
+
+# The direct API reports the evaluation count and the stop reason.
+result = Integration.tanh_sinh(0, 1) { |x| 1.0 / Math.sqrt(x) }
+result.value        # => 2.0
+result.evaluations  # => 57
+result.stop_reason  # => :converged
+result.converged?   # => true
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
 
