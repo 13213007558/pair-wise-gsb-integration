@@ -46,6 +46,25 @@ Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) 
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
 
+### Validated enclosures
+
+Use `Integration.validated_integrate` when the result must contain the true integral. The callback receives a subinterval `[lower, upper]` and must return a value enclosure valid for every point in that interval:
+
+```ruby
+oracle = lambda do |lower, upper|
+  # x^2 is increasing on [1, 2], so these are exact extrema.
+  [lower ** 2, upper ** 2]
+end
+
+result = Integration.validated_integrate(1r, 2r, tolerance: 1r / 10,
+                                         max_evaluations: 127, &oracle)
+result.state        # => :converged
+result.lower_bound  # => Rational lower integral bound
+result.upper_bound  # => Rational upper integral bound
+```
+
+If the budget is exhausted, the same result object is returned with `:budget_exhausted` and the best currently validated enclosure. Float bounds are not treated as proof by default. Either use `Rational` bounds or pass `outward_round: :float`, or provide a callable outward rounding object.
+
 ## License
 
 Copyright (c) 2005  Beng

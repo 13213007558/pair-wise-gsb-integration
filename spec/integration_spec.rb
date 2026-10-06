@@ -63,4 +63,141 @@ describe Integration do
     normal_pdf = lambda { |x| (1 / Math.sqrt(2 * Math::PI)) * Math.exp(-(x**2 / 2)) }
     lambda { Integration.integrate(0, Integration::Infinity, { method: :simpson }, &normal_pdf).should be_within(1e-09).of(0.5) }.should raise_exception
   end
+
+  describe '.validated_integrate' do
+    let(:squared_enclosure) do
+      lambda do |lower, upper|
+        lower = Rational(lower)
+        upper = Rational(upper)
+        [lower**2, upper**2]
+      end
+    end
+
+    let(:analytic_integral) do
+      lambda { |x| Rational(x)**3 / 3 }
+    end
+
+    let(:centered_squared_enclosure) do
+      lambda do |lower, upper|
+        lower = Rational(lower)
+        upper = Rational(upper)
+        midpoint = (lower + upper) / 2
+        half_width = (upper - lower) / 2
+        slack = midpoint.abs * half_width + half_width**2 / 4
+        [midpoint**2 - slack, midpoint**2 + slack]
+      end
+    end
+
+    it 'keeps analytical truth inside increasingly tight Rational enclosures' do
+      truth = analytic_integral.call(2) - analytic_integral.call(1)
+      results = [1, 3, 7, 15, 31].map do |budget|
+        Integration.validated_integrate(
+          1r, 2r, tolerance: 0, max_evaluations: budget, &squared_enclosure
+        )
+      end
+
+      results.each_cons(2) do |previous, current|
+        expect(current.lower_bound).to be >= previous.lower_bound
+        expect(current.upper_bound).to be <= previous.upper_bound
+      end
+
+      results.each do |result|
+        expect(truth).to be_between(result.lower_bound, result.upper_bound)
+        expect(result.state).to eq(:budget_exhausted)
+      end
+      expect(results.last.evaluations).to eq(31)
+    end
+
+    it 'returns the current enclosure when the evaluation budget is exhausted' do
+      result = Integration.validated_integrate(
+        1r, 2r, tolerance: 0, max_evaluations: 3, &squared_enclosure
+      )
+
+      expect(result.state).to eq(:budget_exhausted)
+      expect(result.converged?).to be(false)
+      expect(result.evaluations).to eq(3)
+      expect(result.interval_count).to eq(2)
+      expect(result.lower_bound).to eq(13r / 8)
+      expect(result.upper_bound).to eq(25r / 8)
+      expect(result.error).to eq(3r / 2)
+    end
+
+    it 'converges with Rational bounds without sampling a scalar callback' do
+      result = Integration.validated_integrate(
+        1r, 2r, tolerance: 1r / 10, max_evaluations: 127,
+        &centered_squared_enclosure
+      )
+      truth = analytic_integral.call(2) - analytic_integral.call(1)
+
+      expect(result.state).to eq(:converged)
+      expect(result.converged?).to be(true)
+      expect(result.evaluations).to be <= 127
+      expect(result.error).to be <= 1r / 10
+      expect(truth).to be_between(result.lower_bound, result.upper_bound)
+    end
+
+    it 'requires explicit outward rounding for Float bounds' do
+      expect do
+        Integration.validated_integrate(1.0, 2.0, &squared_enclosure)
+      end.to raise_error(ArgumentError, /explicit outward/)
+    end
+
+    it 'validates Float-bounded integration through explicit outward rounding' do
+      result = Integration.validated_integrate(
+        1.0, 2.0, tolerance: 0.1, max_evaluations: 127,
+        outward_round: :float, &centered_squared_enclosure
+      )
+      truth = analytic_integral.call(2) - analytic_integral.call(1)
+
+      expect(result.state).to eq(:converged)
+      expect(result.lower_bound).to be_a(Float)
+      expect(result.upper_bound).to be_a(Float)
+      expect(result.lower_bound).to be <= truth
+      expect(result.upper_bound).to be >= truth
+      expect(result.error).to be <= 0.1
+    end
+
+    it 'accepts a callable outward rounding object' do
+      rounder = lambda do |value, direction|
+        nearest = value.to_f
+        direction == :down ? nearest.prev_float : nearest.next_float
+      end
+      result = Integration.validated_integrate(
+        1.0, 2.0, tolerance: 0.1, max_evaluations: 127,
+        outward_round: rounder, &centered_squared_enclosure
+      )
+
+      expect(result.state).to eq(:converged)
+      expect(7r / 3).to be_between(result.lower_bound, result.upper_bound)
+    end
+
+    it 'accepts a Range enclosure and preserves reversed-bound orientation' do
+      oracle = lambda do |lower, upper|
+        (Rational(lower)**2..Rational(upper)**2)
+      end
+
+      result = Integration.validated_integrate(
+        2r, 1r, tolerance: 0, max_evaluations: 3, &oracle
+      )
+
+      expect(result.lower_bound).to eq(-25r / 8)
+      expect(result.upper_bound).to eq(-13r / 8)
+      expect(result.bounds).to eq([-25r / 8, -13r / 8])
+      expect(result[:state]).to eq(:budget_exhausted)
+    end
+
+    it 'rejects an ordinary scalar Float sampling callback' do
+      expect do
+        Integration.validated_integrate(1r, 2r) { |point| point.to_f }
+      end.to raise_error(ArgumentError, /two-sided numeric enclosure/)
+    end
+
+    it 'rejects non-finite oracle bounds' do
+      expect do
+        Integration.validated_integrate(1r, 2r) do
+          [0.0, Float::NAN]
+        end
+      end.to raise_error(ArgumentError, /two-sided numeric enclosure/)
+    end
+  end
 end
