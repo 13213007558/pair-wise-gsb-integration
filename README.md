@@ -46,6 +46,23 @@ Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) 
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
 
+For repeated finite-interval integrals of the form `f(x)*cos(omega*x)` or
+`f(x)*sin(omega*x)`, pass the slowly changing amplitude and oscillatory factor
+separately. Near-zero frequencies use ordinary adaptive Gauss-Kronrod
+quadrature; larger frequencies use a Filon rule. The panel count is selected
+from the error estimate, not from the frequency value.
+
+```ruby
+amplitude = lambda { |x| x**2 }
+result = Integration.oscillatory_integral(
+  0, 10, 10_000, kind: :sine, tolerance: 1e-9, &amplitude
+)
+
+result.value                  # integral value
+result.error_estimate         # estimated absolute error
+result.amplitude_evaluations  # number of f(x) evaluations
+```
+
 ## License
 
 Copyright (c) 2005  Beng
