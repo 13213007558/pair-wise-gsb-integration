@@ -11,7 +11,7 @@ Numerical integration for Ruby, with a simple interface. Several different integ
 $ gem install integration
 ```
 
-You can install GSL (please use your package manager) for better performance and support for infinite bounds. After successfully installing the library:
+You can install GSL (please use your package manager) for better performance and an additional QAG backend. Pure Ruby also supports infinite bounds when a tail bound is supplied; without that bound it reports the remaining infinite part as unproven rather than treating a large finite endpoint as infinity. After successfully installing GSL:
 
 ```bash
 $ gem install rb-gsl
@@ -25,6 +25,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
+* Pure Ruby infinite integration supports caller supplied tail bounds, with separate interval, tail, and unproven-part reports
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
 
 ## Examples
@@ -44,6 +45,19 @@ end
 
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
+
+# Pure Ruby infinite integration keeps numerical interval error and the tail bound separate.
+result = Integration.integrate_infinite(
+  0, Integration::Infinity,
+  tolerance: 1e-10,
+  tail_bound: ->(cutoff) { Math.exp(-cutoff) }
+) { |x| Math.exp(-x) }
+
+result.value                 # numerical value over the computed finite interval
+result.interval_error        # estimated error in the computed interval
+result.tail_bound            # caller supplied bound for [cutoff, Infinity)
+result.unproven_part         # 0 when proven, Infinity when the tail cannot be bounded
+result.proven?               # true when interval_error + tail_bound <= tolerance
 ```
 
 ## License

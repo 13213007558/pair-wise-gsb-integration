@@ -95,7 +95,12 @@ module Integration
     # Calls the Simpson's rule recursively on subintervals
     # in case the error exceeds the desired tolerance
     # +tolerance+ is the desired tolerance of error
-    def adaptive_quadrature(a, b, tolerance)
+    def adaptive_quadrature(a, b, tolerance, &block)
+      adaptive_quadrature_with_error(a, b, tolerance, &block).first
+    end
+
+    def adaptive_quadrature_with_error(a, b, tolerance, max_level = nil)
+      max_level ||= [50, (1 / tolerance.to_f).floor].min
       h = (b.to_f - a) / 2
       fa = yield(a)
       fc = yield(a + h)
@@ -103,16 +108,17 @@ module Integration
       s = h * (fa + (4 * fc) + fb) / 3
 
       helper = proc do |_a, _b, _fa, _fb, _fc, _h, _s, level|
-        if level < 1 / tolerance.to_f
+        if level < max_level
           fd = yield(_a + (_h / 2))
           fe = yield(_a + (3 * (_h / 2)))
           s1 = _h * (_fa + (4.0 * fd) + _fc) / 6
           s2 = _h * (_fc + (4.0 * fe) + _fb) / 6
           if ((s1 + s2) - _s).abs <= tolerance
-            s1 + s2
+            [s1 + s2, ((s1 + s2) - _s).abs / 15.0]
           else
-            helper.call(_a, _a + _h, _fa, _fc, fd, _h / 2, s1, level + 1) +
-            helper.call(_a + _h, _b, _fc, _fb, fe, _h / 2, s2, level + 1)
+            left_value, left_error = helper.call(_a, _a + _h, _fa, _fc, fd, _h / 2, s1, level + 1)
+            right_value, right_error = helper.call(_a + _h, _b, _fc, _fb, fe, _h / 2, s2, level + 1)
+            [left_value + right_value, left_error + right_error]
           end
         else
           fail 'Integral did not converge'
@@ -176,6 +182,7 @@ module Integration
       # g7k15
       case points
         when 15
+          n = 15
 
           z = [-0.9914553711208126, -0.9491079123427585, -0.8648644233597691,
                -0.7415311855993945, -0.5860872354676911, -0.4058451513773972,
@@ -191,6 +198,7 @@ module Integration
 
         when 21
           # g10k21
+          n = 21
 
           z = [-0.9956571630258081, -0.9739065285171717, -0.9301574913557082,
                -0.8650633666889845, -0.7808177265864169, -0.6794095682990244,
@@ -211,6 +219,7 @@ module Integration
 
         when 31
           # g15k31
+          n = 31
 
           z = [-0.9980022986933971, -0.9879925180204854, -0.9677390756791391,
                -0.937273392400706, -0.8972645323440819, -0.8482065834104272,
@@ -238,6 +247,7 @@ module Integration
 
         when 41
           # g20k41
+          n = 41
 
           z = [-0.9988590315882777, -0.9931285991850949, -0.9815078774502503,
                -0.9639719272779138, -0.9408226338317548, -0.912234428251326,
@@ -272,6 +282,7 @@ module Integration
 
         when 61
           # g30k61
+          n = 61
 
           z = [-0.9994844100504906, -0.9968934840746495, -0.9916309968704046,
                -0.9836681232797472, -0.9731163225011262, -0.9600218649683075,
@@ -348,7 +359,11 @@ module Integration
 
     # Romberg Method:
     # It is obtained by applying extrapolation techniques repeatedly on the trapezoidal rule
-    def romberg(a, b, tolerance, max_iter = 20)
+    def romberg(a, b, tolerance, max_iter = 20, &block)
+      romberg_with_error(a, b, tolerance, max_iter, &block).first
+    end
+
+    def romberg_with_error(a, b, tolerance, max_iter = 20)
       # NOTE one-based arrays are used for convenience
       h = b.to_f - a
       close = 1
@@ -363,9 +378,9 @@ module Integration
         (1..j).each do |k|
           r[j][k] = ((4**k) * r[j][k - 1] - r[j - 1][k - 1]) / ((4**k) - 1)
         end
-        close = (r[j][j] - r[j - 1][j - 1])
+        close = (r[j][j] - r[j - 1][j - 1]).abs
       end
-      r[j][j]
+      [r[j][j], close]
     end
 
     # Monte Carlo
