@@ -122,6 +122,112 @@ module Integration
       helper.call(a, b, fa, fb, fc, h, s, 1)
     end
 
+    # Vector-valued Adaptive Quadrature
+    # Calls the Simpson's rule recursively on subintervals shared by all
+    # components of a vector-valued function, so the (possibly expensive)
+    # callback is evaluated only once per sample point.
+    #
+    # Each component has its own error target:
+    #   abs_tolerance[i] + rel_tolerance[i] * |estimate[i]|
+    # An interval is refined while *any* component misses its target, so a
+    # large, already converged component cannot mask a small spiky one.
+    #
+    # +abs_tolerance+ and +rel_tolerance+ may be a Numeric (broadcast to all
+    # components) or an Array with one entry per component.
+    # +max_depth+ bounds the recursion; components still above their target
+    # at the depth limit are reported as not converged.
+    #
+    # The callback must return an Array of numerics of constant length.
+    # An empty vector yields an empty result; a length change raises.
+    #
+    # Returns a hash with :values, :errors, :converged (one entry per
+    # component) and :evaluations (total number of callback calls).
+    def adaptive_quadrature_vector(a, b, abs_tolerance, rel_tolerance, max_depth = 20)
+      a = a.to_f
+      b = b.to_f
+      evaluations = 0
+      size = nil
+
+      sample = lambda do |x|
+        value = yield(x)
+        evaluations += 1
+        fail 'Vector-valued callback must return an Array' unless value.is_a? Array
+        if size.nil?
+          size = value.size
+        elsif value.size != size
+          fail "Vector-valued callback changed length from #{size} to #{value.size} during integration"
+        end
+        value.map(&:to_f)
+      end
+
+      fa = sample[a]
+
+      resolve_tolerances = lambda do |spec, name|
+        if spec.is_a? Array
+          unless spec.size == size
+            fail "#{name} has #{spec.size} entries but the callback returns #{size} values"
+          end
+          spec.map(&:to_f)
+        else
+          Array.new(size, spec.to_f)
+        end
+      end
+      abs_tols = resolve_tolerances.call(abs_tolerance, 'abs_tolerance')
+      rel_tols = resolve_tolerances.call(rel_tolerance, 'rel_tolerance')
+
+      if size.zero?
+        return { values: [], errors: [], converged: [], evaluations: evaluations }
+      end
+
+      simpson = lambda do |left, right, f_left, f_mid, f_right|
+        h = (right - left) / 6.0
+        size.times.map { |i| h * (f_left[i] + (4.0 * f_mid[i]) + f_right[i]) }
+      end
+
+      values = Array.new(size, 0.0)
+      errors = Array.new(size, 0.0)
+      converged = Array.new(size, true)
+
+      refine = nil
+      refine = lambda do |left, mid, right, f_left, f_mid, f_right, whole, depth|
+        left_mid = (left + mid) / 2.0
+        right_mid = (mid + right) / 2.0
+        f_left_mid = sample[left_mid]
+        f_right_mid = sample[right_mid]
+        s_left = simpson.call(left, mid, f_left, f_left_mid, f_mid)
+        s_right = simpson.call(mid, right, f_mid, f_right_mid, f_right)
+
+        fine = Array.new(size)
+        err = Array.new(size)
+        all_ok = true
+        size.times do |i|
+          fine[i] = s_left[i] + s_right[i]
+          err[i] = (fine[i] - whole[i]).abs / 15.0
+          all_ok &&= err[i] <= abs_tols[i] + (rel_tols[i] * fine[i].abs)
+        end
+
+        if all_ok || depth >= max_depth
+          size.times do |i|
+            if err[i] > abs_tols[i] + (rel_tols[i] * fine[i].abs)
+              converged[i] = false
+            end
+            values[i] += fine[i] + ((fine[i] - whole[i]) / 15.0)
+            errors[i] += err[i]
+          end
+        else
+          refine.call(left, left_mid, mid, f_left, f_left_mid, f_mid, s_left, depth + 1)
+          refine.call(mid, right_mid, right, f_mid, f_right_mid, f_right, s_right, depth + 1)
+        end
+      end
+
+      mid = (a + b) / 2.0
+      fm = sample[mid]
+      fb = sample[b]
+      refine.call(a, mid, b, fa, fm, fb, simpson.call(a, b, fa, fm, fb), 1)
+
+      { values: values, errors: errors, converged: converged, evaluations: evaluations }
+    end
+
     # Gaussian Quadrature
     # n-point Gaussian quadrature rule gives an exact result for polynomials of degree 2n − 1 or less
     def gauss(t1, t2, n)

@@ -1,3 +1,10 @@
+=== 0.1.5
+  * Added Integration.integrate_vector: vector-valued adaptive quadrature
+    where all components share sample points and interval subdivision but
+    keep per-component absolute/relative error targets. Returns an
+    Integration::VectorResult with per-component diagnostics and the total
+    number of callback evaluations.
+
 === 0.1.4 / 2015-05-23
   * GSL will be used if available. The tests will only pass if rb-gsl is installed.
   * Specs depending on GSL will fail without `rb-gsl` installed.

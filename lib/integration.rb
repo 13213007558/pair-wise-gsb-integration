@@ -44,6 +44,48 @@ module Integration
   # Methods available when using the `rb-gsl` gem.
   GSL_METHODS = [:qng, :qag]
 
+  # Result of a vector-valued integration (see Integration.integrate_vector).
+  #
+  # * +values+ is the vector of integrals, one entry per component.
+  # * +diagnostics+ holds one hash per component:
+  #   <tt>{ index:, value:, error:, converged: }</tt>.
+  # * +evaluations+ is the total number of callback evaluations performed
+  #   (shared by all components).
+  class VectorResult
+    include Enumerable
+
+    attr_reader :values, :diagnostics, :evaluations
+
+    def initialize(values, errors, converged, evaluations)
+      @values = values
+      @evaluations = evaluations
+      @diagnostics = values.each_index.map do |i|
+        { index: i, value: values[i], error: errors[i], converged: converged[i] }
+      end
+    end
+
+    def each(&block)
+      values.each(&block)
+    end
+
+    def [](index)
+      values[index]
+    end
+
+    def size
+      values.size
+    end
+
+    def to_a
+      values
+    end
+
+    # True when every component met its error target.
+    def converged?
+      diagnostics.all? { |d| d[:converged] }
+    end
+  end
+
   class << self
 
     # Check if `value` is plus or minus infinity.
@@ -104,6 +146,47 @@ module Integration
       else
         fail "Unknown integration method \"#{options[:method]}\""
       end
+    end
+
+    # Integrate a vector-valued function +f+ over [t1, t2], evaluating the
+    # callback once per sample point for all components at once. Use this
+    # when one expensive callback returns several quantities: every
+    # component shares the same sample points and interval subdivision, but
+    # is checked against its own error target, so a large converged
+    # component cannot mask a small spiky one.
+    #
+    # The callback must return an Array of numerics whose length stays
+    # constant; a length change raises. An empty Array yields an empty
+    # result (after a single probe evaluation). Permuting the components
+    # (and their tolerances) permutes the results accordingly.
+    #
+    # Options are:
+    # [:abs_tolerance]  Absolute error target per component. Numeric
+    #                   (broadcast) or Array with one entry per component.
+    #                   Default: 1e-10 (+options[:tolerance]+ is accepted as
+    #                   an alias).
+    # [:rel_tolerance]  Relative error target per component, Numeric or
+    #                   Array. Default: 1e-10.
+    # [:max_depth]      Maximum recursion depth of the adaptive
+    #                   subdivision. Default: 20.
+    #
+    # Returns an Integration::VectorResult with per-component diagnostics
+    # and the total number of callback evaluations.
+    def integrate_vector(t1, t2, options = {}, &f)
+      fail 'No function passed' unless block_given?
+      fail 'Non-numeric bounds' unless (t1.is_a? Numeric) && (t2.is_a? Numeric)
+
+      lower_bound = [t1, t2].min
+      upper_bound = [t1, t2].max
+
+      abs_tolerance = options.fetch(:abs_tolerance, options.fetch(:tolerance, 1e-10))
+      rel_tolerance = options.fetch(:rel_tolerance, 1e-10)
+      max_depth = options.fetch(:max_depth, 20)
+
+      raw = adaptive_quadrature_vector(
+        lower_bound, upper_bound, abs_tolerance, rel_tolerance, max_depth, &f
+      )
+      VectorResult.new(raw[:values], raw[:errors], raw[:converged], raw[:evaluations])
     end
 
     # Integrate using the GSL bindings.

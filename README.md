@@ -46,6 +46,34 @@ Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) 
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
 
+## Vector-valued integration
+
+When one expensive callback returns several quantities, integrating each
+component separately repeats the shared computation. `Integration.integrate_vector`
+evaluates the callback once per sample point for all components: every
+component shares the sample points and interval subdivision, but is checked
+against its own absolute/relative error target, so a large converged
+component cannot mask a small spiky one.
+
+```ruby
+# One expensive callback returning 12 quantities at once.
+result = Integration.integrate_vector(0, Math::PI,
+  abs_tolerance: 1e-9,            # Numeric, or an Array with one entry per component
+  rel_tolerance: 1e-9) do |x|
+  (1..12).map { |k| expensive_quantity(x, k) }
+end
+
+result.values       # => vector of 12 integrals
+result.evaluations  # => total callback evaluations (shared by all components)
+result.diagnostics  # => per-component [{ index:, value:, error:, converged: }]
+result.converged?   # => true when every component met its error target
+```
+
+Permuting the components (and their tolerances) only permutes the results.
+An empty vector yields an empty result; a callback that changes its output
+length mid-integration raises. See `examples/vector_integration.rb` for a
+comparison against per-component integration.
+
 ## License
 
 Copyright (c) 2005  Beng
