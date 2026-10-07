@@ -26,6 +26,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
+* Vector-valued adaptive quadrature shares samples and subdivisions between components, while keeping independent absolute and relative error targets.
 
 ## Examples
 
@@ -44,6 +45,32 @@ end
 
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
+
+# Integrate several quantities computed by one expensive callback together.
+amplitude = 1e-3
+width = 0.002
+center = 0.75
+spike = lambda do |x|
+  scaled = (x - center) / width
+  amplitude * Math.exp(-(scaled * scaled))
+end
+
+result = Integration.integrate_vector(
+  0, 1,
+  abs_tolerance: Array.new(11, 1e-6) + [1e-10],
+  relative_tolerance: 0
+) do |x|
+  Array.new(11) { 1000.0 } + [spike.call(x)]
+end
+
+result.values           # component integrals, in callback order
+result.components       # per-component value, error, target, and converged?
+result.callback_count   # shared callback invocations; 95 for this example
+
+# Integrating the same 12 callbacks separately with adaptive_quadrature
+# invokes the scalar callbacks 164 times in total. The shared entry computes
+# all 12 components from each sample and still refines the small, narrow spike
+# independently from the eleven large, already-converged components.
 ```
 
 ## License
