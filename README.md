@@ -25,6 +25,7 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
+* Multilevel Monte Carlo (MLMC) expectation estimation for hierarchies of discretizations (cheap coarse / expensive fine grids) with a coupled sampler, pilot-based optimal sample allocation and per-level sample accounting.
 * If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
 
 ## Examples
@@ -45,6 +46,47 @@ end
 Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
+
+## Multilevel Monte Carlo
+
+When the same simulation is available at several resolutions (a cheap coarse
+grid and increasingly expensive fine grids), `Integration.mlmc` estimates the
+expectation of the finest discretization from a *coupled* sampler. The sampler
+receives a level and a random source, and must evaluate the fine and coarse
+approximations at the *same* random input:
+
+```ruby
+sampler = lambda do |level, rng|
+  omega = rng.rand # shared random input for both resolutions
+  fine  = simulate(omega, grid: 2**level)
+  if level.zero?
+    fine
+  else
+    coarse = simulate(omega, grid: 2**(level - 1))
+    [fine, coarse] # coupled pair; the difference has small variance
+  end
+end
+
+result = Integration.mlmc(tolerance: 0.01, rng: Random.new(42), &sampler)
+result.estimate        # estimated expectation
+result.standard_error  # Monte Carlo sampling error only
+result.samples         # => {0 => ..., 1 => ..., ...} samples drawn per level
+```
+
+The method first draws a small pilot at every level, then allocates the
+remaining samples as N_l proportional to sqrt(V_l / C_l) from the pilot
+variances V_l and the per-sample costs C_l (pass `:budget` instead of
+`:tolerance` to fix the total cost instead of the sampling error, and
+`:costs` to describe the cost per level). Levels are appended automatically
+while the finest-level correction has not decayed enough — specifically while
+the remaining bias extrapolated from the two finest level means exceeds the
+target sampling error — up to `:max_levels`.
+
+Note that `standard_error` and `confidence_interval` quantify the sampling
+error only; they are not a guarantee that the exact expectation lies inside
+the interval, because the discretization bias of the finest level is not
+included. Inspect `result.bias_estimate` for a heuristic indicator of that
+bias.
 
 ## License
 
