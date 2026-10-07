@@ -24,6 +24,7 @@
 # in this Software without prior written authorization from Beng.
 
 require 'integration/methods'
+require 'integration/mlmc'
 
 # Diverse integration methods
 # Use Integration.integrate as wrapper to direct access to methods

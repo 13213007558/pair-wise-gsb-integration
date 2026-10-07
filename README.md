@@ -46,6 +46,49 @@ Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) 
 Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
 ```
 
+## Multilevel Monte Carlo
+
+When the same simulation exists in a cheap coarse-grid version and an
+expensive fine-grid version, `Integration.mlmc` estimates the expectation
+of the finest model with a multilevel Monte Carlo strategy. The caller
+provides a *coupled* sampler for the level differences
+`Y_l = P_l(omega) - P_{l-1}(omega)`, where coarse and fine evaluations
+share the same random input `omega`:
+
+```ruby
+result = Integration.mlmc(
+  sampler: ->(level, n, rng) {
+    Array.new(n) do
+      omega = rng.rand
+      fine  = simulate(level, omega)          # expensive on fine levels
+      level.zero? ? fine : fine - simulate(level - 1, omega)
+    end
+  },
+  costs:  ->(level) { 4.0**level },  # cost per coupled sample
+  budget: 100_000,                   # total cost units
+  pilot_samples: 25,                 # pilot batch per level
+  tolerance: 1e-3,                   # optional target RMSE
+  rng: Random.new(42)                # fixed seed for reproducibility
+)
+
+result.estimate         # MLMC estimate of the expectation
+result.standard_error   # Monte Carlo sampling error only (see below)
+result.samples          # {0 => 5200, 1 => 1300, ...} samples spent per level
+result.confidence_interval(0.95)
+```
+
+A small pilot batch is drawn on every level first; the remaining budget is
+then distributed with the variance-optimal allocation
+`N_l ~ sqrt(Var(Y_l) / C_l)`. Finer levels are appended while the bias
+remaining after the finest level, extrapolated from the geometric decay of
+the level-difference means, exceeds the allowed bias (`tolerance/sqrt(2)`,
+or the current sampling error when no tolerance is given).
+
+Note: the reported standard error and confidence interval quantify Monte
+Carlo *sampling* error only. They are not a strict guarantee covering the
+discretization bias of the finest level; `result.bias_estimate` gives a
+heuristic estimate of that bias.
+
 ## License
 
 Copyright (c) 2005  Beng
