@@ -122,6 +122,40 @@ module Integration
       helper.call(a, b, fa, fb, fc, h, s, 1)
     end
 
+    # Adaptive Simpson quadrature with an error estimate.
+    # Returns [approximation, estimated absolute error].
+    def adaptive_simpson_with_error(a, b, tolerance, max_depth = 50)
+      evaluate = proc do |left, right, error_tolerance, depth|
+        middle = (left + right) / 2.0
+        left_middle = (left + middle) / 2.0
+        right_middle = (middle + right) / 2.0
+
+        f_left = yield(left)
+        f_middle = yield(middle)
+        f_right = yield(right)
+        f_left_middle = yield(left_middle)
+        f_right_middle = yield(right_middle)
+
+        h = (right - left) / 2.0
+        whole = h / 3.0 * (f_left + 4.0 * f_middle + f_right)
+        refined = h / 6.0 * (f_left + 4.0 * f_left_middle + 2.0 * f_middle +
+                             4.0 * f_right_middle + f_right)
+        error = (refined - whole).abs / 15.0
+
+        if error <= error_tolerance
+          [refined + (refined - whole) / 15.0, error]
+        elsif depth >= max_depth
+          [refined + (refined - whole) / 15.0, Float::INFINITY]
+        else
+          left_value, left_error = evaluate.call(left, middle, error_tolerance / 2.0, depth + 1)
+          right_value, right_error = evaluate.call(middle, right, error_tolerance / 2.0, depth + 1)
+          [left_value + right_value, left_error + right_error]
+        end
+      end
+
+      evaluate.call(a.to_f, b.to_f, tolerance.to_f, 0)
+    end
+
     # Gaussian Quadrature
     # n-point Gaussian quadrature rule gives an exact result for polynomials of degree 2n − 1 or less
     def gauss(t1, t2, n)

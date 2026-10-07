@@ -11,7 +11,7 @@ Numerical integration for Ruby, with a simple interface. Several different integ
 $ gem install integration
 ```
 
-You can install GSL (please use your package manager) for better performance and support for infinite bounds. After successfully installing the library:
+Pure Ruby supports infinite bounds when a tail bound is supplied. You can also install GSL (please use your package manager) for a native adaptive implementation:
 
 ```bash
 $ gem install rb-gsl
@@ -25,7 +25,8 @@ You can see the latest documentation for Integration at Rubydoc: [rubydoc.info/g
 
 * Use only one method: Integration.integrate
 * Rectangular, Trapezoidal, Simpson, Adaptive quadrature, Monte Carlo and Romberg integration methods available on pure Ruby.
-* If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-
+* Pure-Ruby infinite intervals report the computed interval error, tail bound, and unproven remainder separately.
+* If available, uses Ruby/GSL QNG non-adaptive Gauss-Kronrod integration and QAG adaptive integration, with support for Infinity+ and Infinity-.
 
 ## Examples
 
@@ -36,14 +37,38 @@ Integration.integrate(1, 2, tolerance: 1e-10, method: :simpson) do |x|
 end
 # => 2.333333
 
-# Support for infinity bounds with GSL QAG adaptative integration.
+# Infinite bounds in pure Ruby. Provide an upper bound on the
+# absolute value of the remaining tail integral.
 
 normal_pdf = lambda do |x|
   (1 / Math.sqrt(2 * Math::PI)) * Math.exp(-0.5 * (x**2))
 end
 
-Integration.integrate(Integration::MInfinity, 0, tolerance: 1e-10, &normal_pdf) # => 0.5
-Integration.integrate(0, Integration::Infinity , tolerance: 1e-10, &normal_pdf) # => 0.5
+tail_bound = lambda do |x, direction|
+  normal_pdf.call(x) / x.abs
+end
+
+result = Integration.integrate_infinite(
+  Integration::MInfinity,
+  Integration::Infinity,
+  tolerance: 1e-10,
+  tail_bound: tail_bound,
+  &normal_pdf
+)
+
+result.value           # => approximately 1.0
+result.interval_error  # => error estimate for the computed intervals
+result.tail_bound      # => caller-provided bound on the omitted tails
+result.unproven        # => 0 when the total bound is below tolerance
+
+# Without a tail bound, only the first finite part is reported and the
+# unproven remainder is Infinity; a large fixed endpoint is not substituted.
+partial = Integration.integrate_infinite(1, Integration::Infinity) { |x| 1.0 / x }
+partial.tail_bound # => Infinity
+partial.unproven   # => Infinity
+
+# When rb-gsl is installed, Integration.integrate continues to use QAG
+# directly for infinite bounds.
 ```
 
 ## License
